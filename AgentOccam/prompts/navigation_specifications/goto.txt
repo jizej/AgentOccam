@@ -1,0 +1,1 @@
+goto [url] [open_in_new_tab=0|1]: To navigate directly to a full URL. Default is 1 to open in a new tab; set to 0 to stay in the current tab. Do not navigate outside the current domain (e.g. do not access outside domains such as github.com). Always include the complete URL (e.g., https://example.com/page). E.g., `goto [https://example.com/login] [1]`

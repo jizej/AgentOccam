@@ -7,6 +7,9 @@ import base64
 import io
 import requests
 import os
+
+from gpt_utils import LLMClient
+
 OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", None)
 AZURE_ENDPOINT = os.environ.get("AZURE_ENDPOINT", None)
 headers = {
@@ -15,13 +18,81 @@ headers = {
 }
 DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
 
-def call_gpt(prompt, model_id="gpt-3.5-turbo", system_prompt=DEFAULT_SYSTEM_PROMPT):
+LLM_API_BASE_URL = os.environ.get("LLM_API_BASE_URL") or os.environ.get("LLM_API_URL")
+_CLIENT = None
+DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant."
+
+def call_gpt_ms(prompt, model_id="gpt-3.5-turbo", system_prompt=DEFAULT_SYSTEM_PROMPT):
+    global _CLIENT
+    if _CLIENT is None:
+        if not LLM_API_BASE_URL:
+            raise ValueError("Missing LLM_API_BASE_URL (or LLM_API_URL) for LLMClient.")
+        _CLIENT = LLMClient(LLM_API_BASE_URL)
     num_attempts = 0
     while True:
         if num_attempts >= 10:
             raise ValueError("OpenAI request failed.")
         try:
-            response = OpenAI().chat.completions.create(
+            response = _CLIENT.chat_completion(
+                [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                model=model_id,
+                temperature=0.95,
+                top_p=0.95,
+                frequency_penalty=0,
+                presence_penalty=0,
+                stop=None
+            )
+            return response["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            print(e)
+            print("Sleeping for 10s...")
+            time.sleep(10)
+            num_attempts += 1
+
+def call_gpt_with_messages_ms(messages, model_id="gpt-3.5-turbo", system_prompt=DEFAULT_SYSTEM_PROMPT):
+    global _CLIENT
+    if _CLIENT is None:
+        if not LLM_API_BASE_URL:
+            raise ValueError("Missing LLM_API_BASE_URL (or LLM_API_URL) for LLMClient.")
+        _CLIENT = LLMClient(LLM_API_BASE_URL)
+    num_attempts = 0
+    while True:
+        if num_attempts >= 10:
+            raise ValueError("OpenAI request failed.")
+        try:
+            prepared_messages = (
+                messages
+                if messages[0]["role"] == "system"
+                else [{"role": "system", "content": system_prompt}] + messages
+            )
+            response = _CLIENT.chat_completion(
+                prepared_messages,
+                model=model_id,
+                temperature=0.5,
+                top_p=0.95,
+                frequency_penalty=0,
+                presence_penalty=0,
+                stop=None
+            )
+            return response["choices"][0]["message"]["content"].strip()
+        except Exception as e:
+            print(e)
+            print("Sleeping for 10s...")
+            time.sleep(10)
+            num_attempts += 1
+
+def call_gpt(prompt, model_id="gpt-3.5-turbo", system_prompt=DEFAULT_SYSTEM_PROMPT):
+    # TODO: check if using azure API is working
+    client = OpenAI() if not AZURE_ENDPOINT else AzureOpenAI(azure_endpoint = AZURE_ENDPOINT, api_key=OPENAI_API_KEY, api_version="2024-02-15-preview")
+    num_attempts = 0
+    while True:
+        if num_attempts >= 10:
+            raise ValueError("OpenAI request failed.")
+        try:
+            response = client.chat.completions.create(
                 model=model_id,
                 messages=[
                     {"role": "system", "content": system_prompt},

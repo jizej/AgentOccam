@@ -1,0 +1,1 @@
+tab_focus [tab_index]: To switch browser focus to a specific tab by its index (0-based unless otherwise specified). E.g., `tab_focus [1]`

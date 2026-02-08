@@ -56,6 +56,13 @@ class WebArenaEnvironmentWrapper():
     
     def get_sites(self):
         return self.config["sites"]
+    
+    def get_tabs_info(self):
+        TAB_str = "Opened tabs: \n"
+        for idx, tab in enumerate(self.webarena_env.context.pages):
+            TAB_str += f"\tTab {idx}: {tab.title()}\n"
+        Current_tab_str = f"Current tab: {self.webarena_env.page.title()}\n"
+        return TAB_str + "\n" + Current_tab_str
         
     def observation(self): 
         self.url = self.webarena_env.page.url
@@ -63,6 +70,7 @@ class WebArenaEnvironmentWrapper():
             root_node = self.obs["text"][1]
             DOM_root_node = prune_tree(objective=self.objective, root_node=root_node, mode="node")
             DOM_str = translate_node_to_str(node=DOM_root_node, mode="concise")
+            # DOM_str = translate_node_to_str(node=DOM_root_node, mode="concise")
             return {"text": DOM_str, "image": self.obs["image"], "node": DOM_root_node}
         else:
             browser_content = self.obs["text"][0]

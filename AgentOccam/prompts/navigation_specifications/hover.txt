@@ -1,0 +1,1 @@
+hover [id]: To hover over an element with its numerical ID (e.g., to reveal tooltips or dropdowns) without clicking. E.g., `hover [7]`
