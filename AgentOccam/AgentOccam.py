@@ -4,7 +4,7 @@ from AgentOccam.llms.mistral import call_mistral, call_mistral_with_messages, ar
 from AgentOccam.llms.cohere import call_cohere, call_cohere_with_messages, arrange_message_for_cohere
 from AgentOccam.llms.llama import call_llama, call_llama_with_messages, arrange_message_for_llama
 from AgentOccam.llms.titan import call_titan, call_titan_with_messages, arrange_message_for_titan
-from AgentOccam.llms.gpt import call_gpt, call_gpt_with_messages, arrange_message_for_gpt
+from AgentOccam.llms.gpt import call_gpt, call_gpt_with_messages, arrange_message_for_gpt, call_gpt_with_messages_ms, call_gpt_ms
 from AgentOccam.llms.gemini import call_gemini, call_gemini_with_messages, arrange_message_for_gemini
 from AgentOccam.utils import CURRENT_DIR, HOMEPAGE_URL
 
@@ -29,7 +29,7 @@ CALL_MODEL_MAP = {
     "cohere": call_cohere,
     "llama": call_llama,
     "titan": call_titan,
-    "gpt": call_gpt,
+    "gpt": call_gpt_ms,
     "gemini": call_gemini,
 }
 CALL_MODEL_WITH_MESSAGES_FUNCTION_MAP = {
@@ -38,7 +38,7 @@ CALL_MODEL_WITH_MESSAGES_FUNCTION_MAP = {
     "cohere": call_cohere_with_messages,
     "llama": call_llama_with_messages,
     "titan": call_titan_with_messages,
-    "gpt": call_gpt_with_messages,
+    "gpt": call_gpt_with_messages_ms,
     "gemini": call_gemini_with_messages,
 }
 ARRANGE_MESSAGE_FOR_MODEL_MAP = {
@@ -296,7 +296,11 @@ class ReflectionActor(Agent):
         return "\n".join(["- " + "".join(open(os.path.join(CURRENT_DIR, "AgentOccam", "prompts", "planning_specifications", f"{p}.txt"), "r").readlines()) for p in self.config.planning_command])
     
     def get_navigation_specifications(self):
-        return "\n".join(["- " + "".join(open(os.path.join(CURRENT_DIR, "AgentOccam", "prompts", "navigation_specifications", f"{n}.txt"), "r").readlines()) for n in self.config.navigation_command])
+        navigation_commands = list(self.config.navigation_command)
+        for extra_cmd in ["goto", "hover", "tab_focus"]:
+            if extra_cmd not in navigation_commands:
+                navigation_commands.append(extra_cmd)
+        return "\n".join(["- " + "".join(open(os.path.join(CURRENT_DIR, "AgentOccam", "prompts", "navigation_specifications", f"{n}.txt"), "r").readlines()) for n in navigation_commands])
     
     def get_instruction(self):
         if self.instruction:
@@ -381,6 +385,14 @@ class Actor(Agent):
                 if element_id in self.get_observation_text():
                     return True
                 return False
+            case "hover":
+                match = re.search(r"hover ?\[(\d+)\]", action_str)
+                if not match:
+                    return False
+                element_id = match.group(1)
+                if element_id in self.get_observation_text():
+                    return True
+                return False
             case "type":
                 if not (action_str.endswith("[0]") or action_str.endswith("[1]")):
                     action_str += " [1]"
@@ -400,6 +412,8 @@ class Actor(Agent):
                     text += "\n"
                 if element_id in self.get_observation_text():
                     return True
+            case "tab_focus":
+                return True
             case "go_back":
                 return True
             case "go_home":
@@ -418,7 +432,7 @@ class Actor(Agent):
                 return True
 
     def are_valid_actions(self, actions):
-        action_list = self.parse_str_to_action_list(actions, self.config.planning_command+self.config.navigation_command+["goto"])
+        action_list = self.parse_str_to_action_list(actions, self.config.planning_command+self.config.navigation_command+["goto", "hover", "tab_focus"])
         if not action_list:
             return False
         for action in action_list:
@@ -565,7 +579,11 @@ class Actor(Agent):
     def get_navigation_specifications(self):
         if self.navigation_specifications:
             return self.navigation_specifications
-        self.navigation_specifications = "\n".join(["- " + "".join(open(os.path.join(CURRENT_DIR, "AgentOccam", "prompts", "navigation_specifications", f"{n}.txt"), "r").readlines()) for n in self.config.navigation_command])
+        navigation_commands = list(self.config.navigation_command)
+        for extra_cmd in ["goto", "hover", "tab_focus"]: # TODO: removed goto for now, agent should not navigate to other pages
+            if extra_cmd not in navigation_commands:
+                navigation_commands.append(extra_cmd)
+        self.navigation_specifications = "\n".join(["- " + "".join(open(os.path.join(CURRENT_DIR, "AgentOccam", "prompts", "navigation_specifications", f"{n}.txt"), "r").readlines()) for n in navigation_commands])
         return self.navigation_specifications
     
     def get_actor_instruction(self, examples=None):
@@ -761,6 +779,8 @@ class Actor(Agent):
                     return action
                 case "stop":
                     return action
+                case "tab_focus":
+                    return action
 
             return False
         except:
@@ -823,6 +843,8 @@ class Actor(Agent):
                     case "stop":
                         pass
                     case "note":
+                        pass
+                    case "tab_focus":
                         pass
 
                 return retained_element_ids
@@ -901,21 +923,35 @@ class Actor(Agent):
         return action_elements
 
     def predict_action(self, criticism_elements):
+        self.pre_process_atomic_actions()
+        instruction = self.get_actor_instruction()
+        online_input = self.get_online_input(criticism_elements=criticism_elements)
+        # print(f"Online input: {online_input}")
+        # print(f"Instruction: {instruction}")
+
         if self.config.debug > 1:
+            os.makedirs(os.path.join(CURRENT_DIR, "debug"), exist_ok=True)
+            # write instruction and online_input to file
+            with open(os.path.join(CURRENT_DIR, "debug", "instruction.txt"), "w") as f:
+                f.write(instruction)
+            with open(os.path.join(CURRENT_DIR, "debug", "online_input.txt"), "w") as f:
+                for idx, each in enumerate(online_input):
+                    f.write(f"INPUT {idx}: {each[1]}\n")
             action_elements = {k: "" for k in self.config.output}
             human_input = input("ACTION: ")
             action_elements["action"] = human_input
             return [action_elements]
-        
-        self.pre_process_atomic_actions()
-        instruction = self.get_actor_instruction()
-        online_input = self.get_online_input(criticism_elements=criticism_elements)
+
         model_response_list = []
         action_element_list = []
         for _ in range(self.config.number):
             get_valid_actions = False
             repetitive_note = False
             invalid_actions = False
+            # print("--------------------------------")
+            # print("Online input:")
+            # print(self.arrange_message_for_model(online_input))
+            # print("--------------------------------")
             while not get_valid_actions:
                 if repetitive_note:
                     model_response = self.call_model_with_message(system_prompt=instruction+"\nGenerating the command `note [{}]` will be severely punished! Don't generate repetitive notes!".format(getattr(self, "note_buffer", "")), messages=self.arrange_message_for_model(online_input))
@@ -1038,6 +1074,12 @@ class Critic(Agent):
                     af.write(f"{t.upper()}:\n{content}\n\n")
 
     def update_actor_basic_info(self, **actor_basic_info_dict):
+        if "navigation_command" in actor_basic_info_dict:
+            navigation_commands = list(actor_basic_info_dict["navigation_command"])
+            for extra_cmd in ["goto", "hover", "tab_focus"]:
+                if extra_cmd not in navigation_commands:
+                    navigation_commands.append(extra_cmd)
+            actor_basic_info_dict["navigation_command"] = navigation_commands
         self.actor_basic_info_dict = actor_basic_info_dict
 
     def get_output_specifications(self):
@@ -1127,6 +1169,12 @@ class Judge(Agent):
         self.output_trash_path = os.path.join(CURRENT_DIR, f"trash-{self.config.others.logname}.txt") if getattr(self.config.others, "logname", "") != "" else os.path.join(CURRENT_DIR, f"trash.txt")
     
     def update_actor_basic_info(self, **actor_basic_info_dict):
+        if "navigation_command" in actor_basic_info_dict:
+            navigation_commands = list(actor_basic_info_dict["navigation_command"])
+            for extra_cmd in ["goto", "hover", "tab_focus"]:
+                if extra_cmd not in navigation_commands:
+                    navigation_commands.append(extra_cmd)
+            actor_basic_info_dict["navigation_command"] = navigation_commands
         self.actor_basic_info_dict = actor_basic_info_dict
 
     def get_judge_instruction(self):
@@ -1349,10 +1397,21 @@ class AgentOccam:
         )
         
     def predict_action(self):
-        self.critic.update_actor_basic_info(step=self.get_step(), planning_specifications=self.actor.get_planning_specifications(), navigation_specifications=self.actor.get_navigation_specifications(), interaction_history=self.actor.get_interaction_history(interaction_history_config=self.critic.config.interaction_history), previous_plans=self.actor.get_previous_plans(verbose=True))
+        self.critic.update_actor_basic_info(step=self.get_step(), 
+                                            planning_specifications=self.actor.get_planning_specifications(), 
+                                            navigation_specifications=self.actor.get_navigation_specifications(), 
+                                            interaction_history=self.actor.get_interaction_history(interaction_history_config=self.critic.config.interaction_history), 
+                                            previous_plans=self.actor.get_previous_plans(verbose=True))
         criticism_elements = self.critic.get_criticism_elements() if not self.get_step()==0 else {}
         action_element_list = self.actor.predict_action(criticism_elements=criticism_elements)
-        self.judge.update_actor_basic_info(step=self.get_step(), planning_specifications=self.actor.get_planning_specifications(), navigation_specifications=self.actor.get_navigation_specifications(), interaction_history=self.actor.get_interaction_history(interaction_history_config=self.judge.config.interaction_history), previous_plans=self.actor.get_previous_plans(verbose=True), planning_command=self.actor.config.planning_command, navigation_command=self.actor.config.navigation_command)
+        self.judge.update_actor_basic_info(step=self.get_step(), 
+                                            planning_specifications=self.actor.get_planning_specifications(), 
+                                            navigation_specifications=self.actor.get_navigation_specifications(), 
+                                            interaction_history=self.actor.get_interaction_history(interaction_history_config=self.judge.config.interaction_history), 
+                                            previous_plans=self.actor.get_previous_plans(verbose=True), 
+                                            planning_command=self.actor.config.planning_command, 
+                                            navigation_command=self.actor.config.navigation_command,
+                                            online_observation=self.online_observation)
         selected_action_elements, judgement_elements = self.judge.judge(action_element_list)
         selected_action_elements = self.actor.finalize_action(selected_action_elements)
         return {**selected_action_elements, **{"critic:"+k: criticism_elements[k] for k in criticism_elements.keys()}, **{"judge:"+k: judgement_elements[k] for k in judgement_elements.keys()}}, action_element_list
